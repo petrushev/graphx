@@ -1,20 +1,21 @@
 from datetime import datetime
 from itertools import islice, imap
 from operator import itemgetter
+from functools import wraps
 
 from twisted.web.http import CONFLICT, CREATED, NOT_FOUND
 from werkzeug.urls import url_unquote
 
 import networkx as nx
 
-from graphx.common import DATETIME_FORMAT
+from graphx.common import DATETIME_FORMAT, _getPaging
+
+itemgetter0 = itemgetter(0)
 
 
-def _graphRepr(name, g):
-    data = dict(g.graph)
-    data['name'] = name
-    data.pop('node_default', None)
-    data.pop('edge_default', None)
+def _reprGraph(graph):
+    data = dict(graph.graph)
+    data['name'] = graph.name
     return data
 
 def create(request):
@@ -24,28 +25,44 @@ def create(request):
     if name in request.app.graphs:
         return request.respondJson({'message': 'graph exists'},
                                    CONFLICT)
-    g = nx.DiGraph(**data.get('attributes', {}))
-    g.graph['created'] = datetime.utcnow().strftime(DATETIME_FORMAT)
-    request.app.graphs[name] = g
+    graph = nx.DiGraph(**data.get('attributes', {}))
+    graph.graph['created'] = datetime.utcnow().strftime(DATETIME_FORMAT)
+    request.app.graphs[name] = graph
+    graph.name = name
 
-    request.respondJson(_graphRepr(name, g), CREATED)
+    request.respondJson(_reprGraph(graph), CREATED)
 
-def show(request, name):
-    name = url_unquote(name)
-    g = _load(request, name)
-    if g is None:
-        return
+def loadGraph(argName='graph'):
 
-    request.respondJson(_graphRepr(name, g))
+    def decorator(fc):
 
-def delete(request, name):
-    name = url_unquote(name)
-    g = _load(request, name)
-    if g is None:
-        return
+        @wraps(fc)
+        def wrapped(request, **kwargs):
+            graphName = kwargs.pop(argName)
+            graphName = url_unquote(graphName)
+            try:
+                graph = request.app.graphs[graphName]
+            except KeyError:
+                return request.respondJson({'message': 'graph {0} not found'.format(graphName)},
+                                           NOT_FOUND)
 
+            graph.name = graphName
+            kwargs[argName] = graph
+
+            return fc(request, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+@loadGraph()
+def show(request, graph):
+    request.respondJson(_reprGraph(graph))
+
+@loadGraph()
+def delete(request, graph):
     try:
-        next(g.nodes_iter())
+        next(graph.nodes_iter())
     except StopIteration:
         # graph empty, proceed to delete
         pass
@@ -60,71 +77,54 @@ def delete(request, name):
             return request.respondJson({'message': 'graph not empty'},
                                        CONFLICT)
 
-    del request.app.graphs[name]
+    del request.app.graphs[graph.name]
 
     request.respondJson({'message': 'deleted successfuly'})
 
-def _load(request, name):
+def _reprNode(g, nodeName):
     try:
-        g = request.app.graphs[name]
+        node = g.node[nodeName]
     except KeyError:
-        return request.respondJson({'message': 'graph {0} not found'.format(name)},
-                            NOT_FOUND)
-    return g
+        raise KeyError('node not in graph')
+    data = dict(node)
+    data['name'] = nodeName
+    data['graph'] = g.name
+    return data
 
-def _reprNode(graphName, nodeName, node):
-    node = dict(node)
-    node['name'] = nodeName
-    node['graph'] = graphName
-    return node
-
-def createNode(request, graphName):
-    graphName = url_unquote(graphName)
-    g = _load(request, graphName)
-    if g is None:
-        return
-
+@loadGraph()
+def createNode(request, graph):
     data = request.json()
     nodeName = data['nodeName']
 
-    if g.has_node(nodeName):
+    if graph.has_node(nodeName):
         return request.respondJson({'message': 'node exists'},
                                    CONFLICT)
 
     attrib = data.get('attributes', {})
     attrib['created'] = datetime.utcnow().strftime(DATETIME_FORMAT)
-    g.add_node(nodeName, **attrib)
+    graph.add_node(nodeName, **attrib)
 
-    request.respondJson(_reprNode(graphName, nodeName, g.node[nodeName]),
+    request.respondJson(_reprNode(graph, nodeName),
                         CREATED)
 
-def showNode(request, graphName, nodeName):
-    graphName = url_unquote(graphName)
-    g = _load(request, graphName)
-    if g is None:
-        return
-
+@loadGraph()
+def showNode(request, graph, nodeName):
     nodeName = url_unquote(nodeName)
     try:
-        node = g.node[nodeName]
-    except KeyError:
-        return request.respondJson({'message': 'node not in graph'},
+        data = _reprNode(graph, nodeName)
+    except KeyError, err:
+        return request.respondJson({'message': err.message},
                                    NOT_FOUND)
-    request.respondJson(_reprNode(graphName, nodeName, node))
+    request.respondJson(data)
 
-def deleteNode(request, graphName, nodeName):
-    graphName = url_unquote(graphName)
-    g = _load(request, graphName)
-    if g is None:
-        return
-
+@loadGraph()
+def deleteNode(request, graph, nodeName):
     nodeName = url_unquote(nodeName)
-    if not g.has_node(nodeName):
+    if not graph.has_node(nodeName):
         return request.respondJson({'message': 'node not in graph'},
                                    NOT_FOUND)
-
     try:
-        next(g.neighbors_iter(nodeName))
+        next(graph.neighbors_iter(nodeName))
     except StopIteration:
         # no neighbours, ok to delete
         pass
@@ -132,7 +132,7 @@ def deleteNode(request, graphName, nodeName):
         return request.respondJson({'message': 'node has edges'},
                                    CONFLICT)
 
-    g.remove_node(nodeName)
+    graph.remove_node(nodeName)
     request.respondJson({'message': 'node deleted'})
 
 def listGraphs(request):
@@ -157,9 +157,10 @@ def _iterFilterNodes(nodes, attrib):
             if match:
                 yield nodeName, nodeData
 
-def _iterNeigborsEdges(g, start, neighbors):
-    start_ = g[start]
-    for end in neighbors:
+def _iterNeigborsEdges(graph, start):
+    ineighbors = graph.neighbors_iter(start)
+    start_ = graph[start]
+    for end in ineighbors:
         edge = start_[end]
         yield end, edge
 
@@ -178,62 +179,42 @@ def _iterFilterEdges(edges, attrib):
             if match:
                 yield end, edge
 
-def listNodes(request, graphName):
-    graphName = url_unquote(graphName)
-    g = _load(request, graphName)
-    if g is None:
-        return
-
-    inodes = g.nodes_iter(data=True)
+@loadGraph()
+def listNodes(request, graph):
+    inodes = graph.nodes_iter(data=True)
     attrib = request.json()
     inodes = _iterFilterNodes(inodes, attrib)
     offset, limit = _getPaging(request)
     inodes = islice(inodes, offset, offset + limit)
-    inodes = imap(itemgetter(0), inodes)
+    inodes = imap(itemgetter0, inodes)
 
     data = {'names': tuple(inodes)}
     request.respondJson(data)
 
-def _getPaging(request):
-    offset = int(request.args.get('offset', [0])[0])
-    limit = int(request.args.get('count', [30])[0])
-    if offset < 0: offset = 0
-    if limit < 1: limit = 1
-    if limit > 30: limit = 30
-    return offset, limit
-
-def createEdge(request, graphName, startNode, endNode):
-    graphName = url_unquote(graphName)
-    g = _load(request, graphName)
-    if g is None:
-        return
-
+@loadGraph()
+def createEdge(request, graph, startNode, endNode):
     start = url_unquote(startNode)
     end = url_unquote(endNode)
-    if not (g.has_node(start) and g.has_node(end)):
+    if not (graph.has_node(start) and graph.has_node(end)):
         return request.respondJson({'message': 'node not in graph'},
                                    NOT_FOUND)
 
     attrib = request.json()
     attrib['created'] = datetime.utcnow().strftime(DATETIME_FORMAT)
 
-    g.add_edge(start, end, **attrib)
-    data = g.edge[start][end]
+    graph.add_edge(start, end, **attrib)
+    data = graph.edge[start][end]
     data.update({'start': start, 'end': end,
-                 'graph': graphName})
+                 'graph': graph.name})
 
     request.respondJson(data, CREATED)
 
-def showEdge(request, graphName, startNode, endNode):
-    graphName = url_unquote(graphName)
-    g = _load(request, graphName)
-    if g is None:
-        return
-
+@loadGraph()
+def showEdge(request, graph, startNode, endNode):
     start = url_unquote(startNode)
     end = url_unquote(endNode)
     try:
-        edge = g.edge[start][end]
+        edge = graph.edge[start][end]
     except KeyError:
         return request.respondJson(
             {'message': 'nodes not in graph or not linked'},
@@ -241,45 +222,35 @@ def showEdge(request, graphName, startNode, endNode):
 
     edge = dict(edge)
     edge.update({'start': start, 'end': end,
-                 'graph': graphName})
+                 'graph': graph.name})
     request.respondJson(edge)
 
-def deleteEdge(request, graphName, startNode, endNode):
-    graphName = url_unquote(graphName)
-    g = _load(request, graphName)
-    if g is None:
-        return
-
+@loadGraph()
+def deleteEdge(request, graph, startNode, endNode):
     start = url_unquote(startNode)
     end = url_unquote(endNode)
     try:
-        _edge = g.edge[start][end]
+        _edge = graph.edge[start][end]
     except KeyError:
         return request.respondJson({'message': 'edge not in graph'},
                                    NOT_FOUND)
 
-    g.remove_edge(start, end)
+    graph.remove_edge(start, end)
     request.respondJson({'message': 'edge deleted'})
 
-def listEdges(request, graphName, startNode):
-    graphName = url_unquote(graphName)
-    g = _load(request, graphName)
-    if g is None:
-        return
-
-    if not g.has_node(startNode):
+@loadGraph()
+def listEdges(request, graph, startNode):
+    if not graph.has_node(startNode):
         return request.respondJson({'message': 'node not in graph'},
                                    NOT_FOUND)
 
     start = url_unquote(startNode)
-    ineighbors = g.neighbors_iter(start)
-
-    iNeighborsEdges = _iterNeigborsEdges(g, start, ineighbors)
+    iNeighborsEdges = _iterNeigborsEdges(graph, start)
 
     attrib = request.json()
     iNeighborsEdges = _iterFilterEdges(iNeighborsEdges, attrib)
 
     offset, limit = _getPaging(request)
     iNeighborsEdges = islice(iNeighborsEdges, offset, offset + limit)
-    data = {'neighbors': dict(iNeighborsEdges)}
-    request.respondJson(data)
+
+    request.respondJson({'neighbors': dict(iNeighborsEdges)})

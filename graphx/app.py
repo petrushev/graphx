@@ -1,9 +1,7 @@
 from os import environ, walk
 from os.path import dirname, abspath
 from os.path import join as path_join
-
-import networkx as nx
-from xml.etree.cElementTree import ParseError
+import pickle
 
 from twisted.internet import reactor
 from twisted.internet.task import deferLater
@@ -19,23 +17,35 @@ except KeyError:
 
 class Application(object):
 
-    def persistGraph(self, name, g):
+    def persistGraph(self, g):
+        name = g.name
         filepath = path_join(self._persistPath, name)
-        nx.write_graphml(g, filepath)
+        with open(filepath + '.pickle', 'wb') as f:
+            f.write(pickle.dumps(g, pickle.HIGHEST_PROTOCOL))
 
     def periodicPersist(self):
-        for name, g in self.graphs.iteritems():
-            self.persistGraph(name, g)
+        for g in self.graphs.itervalues():
+            self.persistGraph(g)
 
         deferLater(reactor, PERSIST_INTERVAL, self.periodicPersist)
 
     def loadGraph(self, filename):
         filepath = path_join(self._persistPath, filename)
-        try:
-            g = nx.read_graphml(filepath)
-        except (nx.NetworkXError, ParseError, IndexError):
+
+        if not filepath.endswith('.pickle'):
             return
-        name = filename
+        try:
+            f = open(filename, 'rb')
+        except IOError:
+            return
+        data = f.read()
+        try:
+            g = pickle.loads(data)
+        except pickle.UnpicklingError:
+            return
+
+        name = filename[:-7]
+        g.name = name
         self.graphs[name] = g
 
     def loadAll(self):
@@ -54,5 +64,5 @@ class Application(object):
 
     def onStop(self):
         while self.graphs:
-            name, g = self.graphs.popitem()
-            self.persistGraph(name, g)
+            _, g = self.graphs.popitem()
+            self.persistGraph(g)

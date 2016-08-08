@@ -56,7 +56,7 @@ Graphs
 Nodes
 -----
 
-* POST ``/graphs/<graphName>/nodes``
+* POST ``/graphs/<graph>/nodes``
 
     Create a new node on a specific graph
 
@@ -73,7 +73,7 @@ Nodes
           - created
           - attributes: dictionary
 
-* GET ``/graphs/<graphName>/nodes/<nodeName>``
+* GET ``/graphs/<graph>/nodes/<nodeName>``
 
     Retrieve node
 
@@ -81,11 +81,11 @@ Nodes
 
       - node
 
-* DELETE ``/graphs/<graphName>/nodes/<nodeName>``
+* DELETE ``/graphs/<graph>/nodes/<nodeName>``
 
     Delete node
 
-* GET ``/graphs/<graphName>/nodes``
+* GET ``/graphs/<graph>/nodes``
 
     List nodes, optional filtering
 
@@ -106,7 +106,7 @@ Nodes
 Edges
 -----
 
-* POST ``/graphs/<graphName>/edges/<start>/<end>``
+* POST ``/graphs/<graph>/edges/<start>/<end>``
 
     Create edge between two specific nodes
 
@@ -123,7 +123,7 @@ Edges
           - created
           - attributes: dictionary
 
-* GET ``/graphs/<graphName>/edges/<start>/<end>``
+* GET ``/graphs/<graph>/edges/<start>/<end>``
 
     Retrieve edge
 
@@ -131,11 +131,11 @@ Edges
 
       - edge
 
-* DELETE ``/graphs/<graphName>/edges/<start>/<end>``
+* DELETE ``/graphs/<graph>/edges/<start>/<end>``
 
     Delete edge
 
-* GET ``/graphs/<graphName>/edges/<start>``
+* GET ``/graphs/<graph>/edges/<start>``
 
     List edges linked to a specific node
 
