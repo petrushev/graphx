@@ -7,7 +7,8 @@ A thin rest api over networkx, can serve as a graph database.
 API documentation
 -----------------
 
-See `API documentation <doc/api.rst>`_
+* `Graphs, nodes, edges <doc/api.rst>`_
+* `Paths <doc/paths.rst>`_
 
 
 Persistence
