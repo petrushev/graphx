@@ -72,6 +72,37 @@ def test_longestpath():
     r = rq.get('{0}/graphs/{1}/paths/longest'.format(BASE, 'cycled'))
     assert r.status_code == 404
 
+def test_querypaths():
+    r = rq.get('{0}/graphs/{1}/paths/query'.format(BASE, 'dag'),
+               json={'nodeAttributes': [{}, {}, {}],
+                     'edgeAttributes': [{'color': 'red'},
+                                        {'color': 'blue'}]})
+    paths = r.json()['paths']
+    assert len(paths) == 1, paths
+    assert paths[0] == 'a,b,c'.split(','), paths[0]
+
+    r = rq.get('{0}/graphs/{1}/paths/query'.format(BASE, 'dag'),
+               json={'nodeAttributes': [{}, {'name': 'b'}, {}],
+                     'edgeAttributes': [{'color': 'red'}, {}]})
+    paths = r.json()['paths']
+    assert len(paths) == 3
+    tmp = set([tuple(path[:2]) for path in paths])
+    assert len(tmp) == 1
+    assert tuple(tmp)[0] == ('a', 'b'), tmp
+
+    r = rq.get('{0}/graphs/{1}/paths/query'.format(BASE, 'dag'),
+               json={'nodeAttributes': [{}, {'name': 'd'}, {}],
+                     'edgeAttributes': [{'color': 'red'}, {}]})
+    paths = r.json()['paths']
+    assert len(paths) == 1, paths
+    assert paths[0] == 'a,d,h'.split(','), paths[0]
+
+    r = rq.get('{0}/graphs/{1}/paths/query'.format(BASE, 'dag'),
+               json={'nodeAttributes': [{'name': 'z'}, {}],
+                     'edgeAttributes': [{}]})
+    paths = r.json()['paths']
+    assert len(paths) == 0, paths
+
 def tearDown():
     for gname in data:
         rq.delete('{0}/graphs/{1}'.format(BASE, gname),

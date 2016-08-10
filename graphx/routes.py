@@ -23,5 +23,6 @@ url_map = Map([
     Rule('/graphs/<graph>/paths/cycles', endpoint=paths.cycles, methods=['GET']),
     Rule('/graphs/<graph>/paths/longest', endpoint=paths.longestPath, methods=['GET']),
     Rule('/graphs/<graph>/topologicalsort', endpoint=paths.topologicalSort, methods=['GET']),
+    Rule('/graphs/<graph>/paths/query', endpoint=paths.query, methods=['GET']),
     Rule('/_/service/stop', endpoint=service.stop, methods=['PUT']),
 ])

@@ -8,7 +8,7 @@ from werkzeug.urls import url_unquote
 
 import networkx as nx
 
-from graphx.common import DATETIME_FORMAT, _getPaging
+from graphx.common import DATETIME_FORMAT, _getPaging, matchAttributes
 
 itemgetter0 = itemgetter(0)
 
@@ -143,19 +143,9 @@ def listGraphs(request):
     request.respondJson(data)
 
 def _iterFilterNodes(nodes, attrib):
-    if len(attrib) == 0:
-        for nodeName, nodeData in nodes:
+    for nodeName, nodeData in nodes:
+        if matchAttributes(nodeData, attrib):
             yield nodeName, nodeData
-    else:
-        attrib = attrib.items()
-        for nodeName, nodeData in nodes:
-            match = True
-            for k, v in attrib:
-                if nodeData.get(k) != v:
-                    match = False
-                    break
-            if match:
-                yield nodeName, nodeData
 
 def _iterNeigborsEdges(graph, start):
     ineighbors = graph.neighbors_iter(start)
@@ -165,19 +155,9 @@ def _iterNeigborsEdges(graph, start):
         yield end, edge
 
 def _iterFilterEdges(edges, attrib):
-    if len(attrib) == 0:
-        for edge in edges:
-            yield edge
-    else:
-        attrib = attrib.items()
-        for end, edge in edges:
-            match = True
-            for k, v in attrib:
-                if edge.get(k) != v:
-                    match = False
-                    break
-            if match:
-                yield end, edge
+    for end, edge in edges:
+        if matchAttributes(edge, attrib):
+            yield end, edge
 
 @loadGraph()
 def listNodes(request, graph):

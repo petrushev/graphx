@@ -1,13 +1,14 @@
 from itertools import islice
 
-from twisted.web.http import NOT_FOUND
+from twisted.web.http import NOT_FOUND, BAD_REQUEST
 from werkzeug.urls import url_unquote
 
 import networkx as nx
 from networkx.exception import NetworkXUnfeasible
 
-from graphx.common import _getPaging
+from graphx.common import _getPaging, matchAttributes
 from graphx.controllers.graphs import loadGraph
+
 
 @loadGraph()
 def simple(request, graph, startNode, endNode):
@@ -19,9 +20,7 @@ def simple(request, graph, startNode, endNode):
 
     ipaths = nx.shortest_simple_paths(graph, start, end)
 
-    data = {'graph': graph.name,
-            'start': start, 'end': end,
-            'paths': tuple(ipaths)}
+    data = {'paths': tuple(ipaths)}
     request.respondJson(data)
 
 @loadGraph()
@@ -50,3 +49,58 @@ def longestPath(request, graph):
         return request.respondJson({'message': err.message}, NOT_FOUND)
 
     request.respondJson({'longestPath': path_})
+
+@loadGraph()
+def query(request, graph):
+    data = request.json()
+    nodeAttributes = data['nodeAttributes']
+    edgeAttributes = data['edgeAttributes']
+
+    if len(edgeAttributes) != len(nodeAttributes) - 1:
+        return request.respondJson({'message': 'incompatible filter attributes'},
+                                   BAD_REQUEST)
+
+    startAttr = nodeAttributes.pop(0)
+
+    start = startAttr.pop('name', None)
+    if start is not None:
+        if graph.has_node(start) and matchAttributes(graph.node[start], startAttr):
+            paths = [(start,)]
+        else:
+            return request.respondJson({'paths': []})
+
+    else:
+        istart = graph.nodes_iter(data=True)
+        paths = [(start,)
+                 for start, startData in istart
+                 if matchAttributes(startData, startAttr)]
+
+    for edgeAttr, targetAttr in zip(edgeAttributes, nodeAttributes):
+        paths = _iterExpandPaths(graph, paths, targetAttr, edgeAttr)
+
+    request.respondJson({'paths': tuple(paths)})
+
+def _iterExpandPaths(graph, paths, targetAttr, edgeAttr):
+    targetFilterName = targetAttr.pop('name', None)
+    for currentPath in paths:
+        currentStart = currentPath[-1]
+        currentStartNode = graph[currentStart]
+
+        for target in graph.successors_iter(currentStart):
+            if targetFilterName is not None and target != targetFilterName:
+                continue
+
+            # check for cycle
+            if target in currentPath:
+                continue
+
+            # filter edges
+            edge = currentStartNode[target]
+            if not matchAttributes(edge, edgeAttr):
+                continue
+
+            # filter target
+            if not matchAttributes(graph.node[target], targetAttr):
+                continue
+
+            yield currentPath + (target,)
